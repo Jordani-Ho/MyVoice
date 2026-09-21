@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>声音工坊 · 个人声音克隆</title>
+<style>
+  /* ==========================================================================
+     配色 / 排版变量
+     整体走"录音室控制台"的感觉：暖色深底 + 单一琥珀色强调色，
+     避免做成通用的浅色 SaaS 卡片风格。
+     ========================================================================== */
+  :root {
+    --bg: #17140f;
+    --panel: #1f1b14;
+    --panel-border: #35301f;
+    --text: #ece6d8;
+    --text-dim: #a89d84;
+    --accent: #e8a33d;
+    --accent-dim: #6b5326;
+    --ok: #8fbf7f;
+    --error: #e07a6b;
+    --mono: ui-monospace, SFMono-Regular, "Courier New", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 48px 20px 80px;
+  }
+
+  main {
+    width: 100%;
+    max-width: 620px;
+  }
+
+  /* 顶部一段简单的静态"波形"装饰，暗示这是一个音频工具 */
+  .waveform {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 40px;
+    margin-bottom: 28px;
+  }
+  .waveform span {
+    display: block;
+    width: 4px;
+    background: var(--accent-dim);
+    border-radius: 2px;
+  }
+  .waveform span:nth-child(3n) { background: var(--accent); }
+
+  header h1 {
+    font-size: 26px;
+    font-weight: 600;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  header p {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0 0 40px;
+    max-width: 46ch;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .step .num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--panel-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .step.done .num {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .step-body { min-width: 0; }
+  .step-title {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+  }
+  .step-hint {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+    line-height: 1.5;
+  }
+
+  input[type="password"],
+  input[type="text"],
+  textarea {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 11px 13px;
+    font-family: var(--sans);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  input:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
+
+  .file-drop {
+    border: 1px dashed var(--panel-border);
+    border-radius: 8px;
+    padding: 18px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-dim);
+    transition: border-color 0.15s ease;
+  }
+  .file-drop:hover { border-color: var(--accent); }
+  .file-drop.has-file {
+    border-style: solid;
+    border-color: var(--accent-dim);
+    color: var(--text);
+  }
+  .file-drop input { display: none; }
+  .file-drop .fname {
+    font-family: var(--mono);
+    color: var(--accent);
+  }
+
+  button.generate {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #1a1509;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease, transform 0.05s ease;
+  }
+  button.generate:hover:not(:disabled) { opacity: 0.92; }
+  button.generate:active:not(:disabled) { transform: scale(0.99); }
+  button.generate:disabled {
+    background: var(--accent-dim);
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
+
+  .status {
+    margin-top: 16px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .status.error { color: var(--error); }
+  .status.ok { color: var(--ok); }
+
+  .reset-link {
+    display: inline-block;
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    text-decoration: underline;
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 0;
+  }
+  .reset-link:hover { color: var(--accent); }
+
+  .result {
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--panel-border);
+  }
+  .result audio { width: 100%; }
+  .result.hidden { display: none; }
+
+  footer {
+    margin-top: 48px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="waveform" id="waveform"></div>
+
+  <header>
+    <h1>声音工坊</h1>
+    <p>
+      上传一段 5–20 秒的清晰人声样本，克隆出你的专属音色，
+      再输入任意文字，用这个音色朗读出来。数据经你自己部署的后端转发给
+      阿里云百炼，不会经过任何第三方服务器。
+    </p>
+  </header>
+
+  <!-- 第一步：API Key -->
+  <div class="step" id="step-key">
+    <div class="num">1</div>
+    <div class="step-body">
+      <div class="step-title">填写阿里云百炼 API Key</div>
+      <div class="step-hint">
+        新加坡节点的 Key，在百炼控制台「API-KEY 管理」里获取。Key 只保存在你当前浏览器的内存里，
+        刷新页面后需要重新填写，不会被发送到除你自己后端以外的任何地方。
+      </div>
+      <input type="password" id="apiKey" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+    </div>
+  </div>
+
+  <!-- 第二步：上传参考音频 -->
+  <div class="step" id="step-audio">
+    <div class="num">2</div>
+    <div class="step-body">
+      <div class="step-title">上传参考音频</div>
+      <div class="step-hint">支持 wav / mp3 / m4a，建议 5–20 秒，环境安静、吐字清晰、不要有背景音乐。</div>
+      <label class="file-drop" id="fileDrop">
+        <span id="fileDropText">点击选择音频文件</span>
+        <input type="file" id="audioFile" accept=".wav,.mp3,.m4a,audio/*" />
+      </label>
+    </div>
+  </div>
+
+  <!-- 第三步：输入文本 -->
+  <div class="step" id="step-text">
+    <div class="num">3</div>
+    <div class="step-body">
+      <div class="step-title">输入要合成的文字</div>
+      <div class="step-hint">支持中英文，建议单次不超过 2000 字。</div>
+      <textarea id="ttsText" placeholder="在这里输入想让 AI 用你的声音朗读的内容……"></textarea>
+    </div>
+  </div>
+
+  <!-- 第四步：生成 -->
+  <div class="step" id="step-generate">
+    <div class="num">4</div>
+    <div class="step-body">
+      <div class="step-title">生成语音</div>
+      <div class="step-hint">首次生成会先克隆音色（耗时稍长），之后只改文字、不换音频时会直接复用已克隆的音色。</div>
+      <button class="generate" id="generateBtn">生成语音</button>
+      <div class="status" id="status"></div>
+      <button class="reset-link" id="resetVoice" style="display:none;">清除已复刻的音色，重新上传音频复刻</button>
+    </div>
+  </div>
+
+  <div class="result hidden" id="result">
+    <div class="step-title" style="margin-bottom:10px;">合成结果</div>
+    <audio id="player" controls></audio>
+    <div class="step-hint" style="margin-top:8px;">该下载链接由阿里云提供，有效期 24 小时。</div>
+  </div>
+
+  <footer>
+    MVP 版本 · 仅供个人学习测试使用 · 后端地址：<span id="backendShown" style="font-family:var(--mono);"></span>
+  </footer>
+</main>
+
+<script>
+  // ============================================================================
+  // ⚠️ 部署前必须修改：把这里改成你后端（Render / Railway）部署好之后的真实地址。
+  // 本地调试时保持 http://localhost:3001 不用改。
+  // ============================================================================
+  const API_BASE = "http://localhost:3001";
+
+  document.getElementById("backendShown").textContent = API_BASE;
+
+  // ---------------------------------------------------------------------------
+  // 顶部装饰性波形（纯样式装饰，和功能无关）
+  // ---------------------------------------------------------------------------
+  (function renderWaveform() {
+    const el = document.getElementById("waveform");
+    const heights = [10, 22, 14, 34, 18, 40, 24, 12, 30, 20, 8, 26, 16, 36, 22, 10];
+    heights.forEach((h) => {
+      const bar = document.createElement("span");
+      bar.style.height = h + "px";
+      el.appendChild(bar);
+    });
+  })();
+
+  // ---------------------------------------------------------------------------
+  // DOM 元素引用
+  // ---------------------------------------------------------------------------
+  const apiKeyInput = document.getElementById("apiKey");
+  const fileInput = document.getElementById("audioFile");
+  const fileDrop = document.getElementById("fileDrop");
+  const fileDropText = document.getElementById("fileDropText");
+  const ttsText = document.getElementById("ttsText");
+  const generateBtn = document.getElementById("generateBtn");
+  const statusEl = document.getElementById("status");
+  const resultEl = document.getElementById("result");
+  const player = document.getElementById("player");
+  const resetVoiceBtn = document.getElementById("resetVoice");
+  const stepAudio = document.getElementById("step-audio");
+  const stepGenerate = document.getElementById("step-generate");
+
+  // 缓存已经复刻好的音色 ID，避免每次生成都重新复刻（复刻本身也会消耗配额）。
+  // 只要用户没有更换音频文件，这个值就会一直被复用。
+  let cachedVoiceId = null;
+
+  // ---------------------------------------------------------------------------
+  // 选择文件后的界面反馈
+  // ---------------------------------------------------------------------------
+  fileInput.addEventListener("change", () => {
+    // 换了新文件，之前复刻的音色就不能再用了，需要清空缓存重新复刻
+    cachedVoiceId = null;
+    resetVoiceBtn.style.display = "none";
+    stepAudio.classList.remove("done");
+
+    const file = fileInput.files[0];
+    if (file) {
+      fileDrop.classList.add("has-file");
+      fileDropText.innerHTML = "已选择：<span class=\"fname\">" + escapeHtml(file.name) + "</span>";
+    } else {
+      fileDrop.classList.remove("has-file");
+      fileDropText.textContent = "点击选择音频文件";
+    }
+  });
+
+  resetVoiceBtn.addEventListener("click", () => {
+    cachedVoiceId = null;
+    resetVoiceBtn.style.display = "none";
+    stepAudio.classList.remove("done");
+    setStatus("已清除音色缓存，下次生成会重新复刻。", "");
+  });
+
+  // ---------------------------------------------------------------------------
+  // 生成按钮主流程
+  // ---------------------------------------------------------------------------
+  generateBtn.addEventListener("click", async () => {
+    const apiKey = apiKeyInput.value.trim();
+    const text = ttsText.value.trim();
+    const file = fileInput.files[0];
+
+    if (!apiKey) return setStatus("请先填写阿里云百炼 API Key。", "error");
+    if (!cachedVoiceId && !file) return setStatus("请先上传一段参考音频。", "error");
+    if (!text) return setStatus("请输入要合成的文字。", "error");
+
+    setLoading(true);
+
+    try {
+      // 第一步（仅在还没有缓存音色时执行）：声音复刻
+      if (!cachedVoiceId) {
+        setStatus("正在复刻音色，请稍候……", "");
+        cachedVoiceId = await cloneVoice(apiKey, file);
+        stepAudio.classList.add("done");
+        resetVoiceBtn.style.display = "inline-block";
+        setStatus("音色复刻成功（ID: " + cachedVoiceId + "），正在合成语音……", "");
+      } else {
+        setStatus("正在使用已复刻的音色合成语音……", "");
+      }
+
+      // 第二步：用（新复刻的或缓存的）音色合成语音
+      const audioUrl = await synthesize(apiKey, cachedVoiceId, text);
+
+      player.src = audioUrl;
+      resultEl.classList.remove("hidden");
+      stepGenerate.classList.add("done");
+      setStatus("生成成功！可以在下方播放或下载。", "ok");
+    } catch (err) {
+      setStatus("出错了：" + err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 调用后端：声音复刻
+  // ---------------------------------------------------------------------------
+  async function cloneVoice(apiKey, file) {
+    const form = new FormData();
+    form.append("apiKey", apiKey);
+    form.append("audio", file);
+
+    const resp = await fetch(API_BASE + "/api/clone-voice", {
+      method: "POST",
+      body: form,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "声音复刻请求失败");
+    return data.voiceId;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 调用后端：语音合成
+  // ---------------------------------------------------------------------------
+  async function synthesize(apiKey, voiceId, text) {
+    const resp = await fetch(API_BASE + "/api/synthesize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey, voiceId, text }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || "语音合成请求失败");
+    return data.audioUrl;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 小工具函数
+  // ---------------------------------------------------------------------------
+  function setStatus(msg, type) {
+    statusEl.textContent = msg;
+    statusEl.className = "status" + (type ? " " + type : "");
+  }
+
+  function setLoading(loading) {
+    generateBtn.disabled = loading;
+    generateBtn.textContent = loading ? "生成中…" : "生成语音";
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+</script>
+</body>
+</html>
