@@ -1,7 +1,7 @@
 # 声音工坊 · 个人声音克隆与语音合成（MVP）
 
-一个基于阿里云百炼（Model Studio，新加坡节点）Qwen-TTS 声音复刻能力的最小可用产品：
-上传一段 5–20 秒的参考音频，克隆出专属音色，再用这个音色朗读任意文字。
+一个基于 ElevenLabs 声音克隆能力的最小可用产品：上传一段 5–20 秒的参考音频，
+克隆出专属音色，再用这个音色朗读任意文字。
 
 ---
 
@@ -12,6 +12,7 @@ voice-clone-mvp/
 ├── backend/                 后端：Node.js + Express
 │   ├── server.js            核心代码（含详细中文注释）
 │   ├── package.json
+│   ├── package-lock.json
 │   ├── .env.example
 │   └── .gitignore
 ├── frontend/                 前端：纯 HTML / CSS / JS 单文件
@@ -21,33 +22,22 @@ voice-clone-mvp/
 
 ---
 
-## 技术选型说明（请务必先看这一段）
+## 技术说明
 
-需求里提到的域名 `https://ws-xxxxxxxx.ap-southeast-1.maas.aliyuncs.com` 是你的百炼工作空间
-专属域名，通常用于 **CosyVoice** 的实时语音合成，走的是 WebSocket 长连接协议。
+后端调用的是 ElevenLabs 两个标准 HTTP 接口，都是普通 POST 请求/响应，
+不需要 WebSocket，也不需要把音频先传到公网某个地址：
 
-本项目最终选择的是另一条更适合"网页 MVP"的路线：**Qwen-TTS 声音复刻**。原因：
+1. **声音复刻**：`POST https://api.elevenlabs.io/v1/voices/add`
+   （multipart/form-data，直接把上传的音频文件转发过去，返回 `voice_id`）
+2. **语音合成**：`POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}`
+   （JSON 请求，直接返回音频二进制数据，后端原样转发给前端）
 
-| 对比项 | CosyVoice（你提供的域名） | Qwen-TTS（本项目采用） |
-|---|---|---|
-| 合成协议 | WebSocket 长连接 | 标准 HTTP POST |
-| 上传参考音频 | 需要先传到 OSS，拿公网 URL | 可直接传 Base64，前端选完文件即可用 |
-| 是否需要 Workspace ID | 需要 | 不需要 |
-| Node.js 实现复杂度 | 较高 | 低，适合 MVP |
+鉴权用的是 `xi-api-key` 这个请求头（不是常见的 `Authorization: Bearer`），
+代码里已经处理好了，不需要你关心这个细节。
 
-也就是说，你提供的域名在这版代码里**没有被直接使用**——这是特意做出的技术选型，不是遗漏。
-如果之后想换成 CosyVoice（比如想要更多方言音色、或者想做实时打字实时出声的效果），
-可以参考文末「扩展方向」一节。
-
-后端调用的两个阿里云接口是：
-
-1. **声音复刻**：`POST https://dashscope-intl.aliyuncs.com/api/v1/services/audio/tts/customization`
-2. **语音合成**：`POST https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`
-
-⚠️ 阿里云的接口细节、模型名（代码里的 `qwen3-tts-vc-2026-01-22`）会不定期更新，
-如果实际调用报错提示"模型不存在"或"参数不合法"，请对照百炼控制台的最新文档核对：
-- https://www.alibabacloud.com/help/zh/model-studio/voice-cloning-user-guide
-- https://www.alibabacloud.com/help/zh/model-studio/non-realtime-tts-user-guide
+⚠️ 第三方 API 的接口细节偶尔会更新，如果调用报错，对照最新官方文档核对：
+- https://elevenlabs.io/docs/api-reference/voices/ivc/create
+- https://elevenlabs.io/docs/api-reference/text-to-speech/convert
 
 ---
 
@@ -78,7 +68,7 @@ npm start
 用浏览器直接双击打开，或者用编辑器（如 VS Code）的 Live Server 插件打开都可以。
 
 打开后：
-1. 填入你的阿里云百炼 API Key（新加坡节点）
+1. 填入你的 ElevenLabs API Key（在 ElevenLabs 后台「Profile → API Keys」里获取）
 2. 上传一段 5–20 秒的清晰人声音频
 3. 输入要合成的文字
 4. 点击「生成语音」
@@ -96,8 +86,8 @@ npm start
 ### 第一步：把代码推到 GitHub
 
 Render / Vercel 都支持"连接 GitHub 仓库自动部署"，最省心。把整个 `voice-clone-mvp` 文件夹
-初始化成一个 Git 仓库并推送到你自己的 GitHub 账号下（如果你还不熟悉 Git，也可以用 Render /
-Vercel 的"直接拖拽上传"功能，见下面的备选说明）。
+初始化成一个 Git 仓库并推送到你自己的 GitHub 账号下（如果你还不熟悉 Git，也可以用 GitHub
+网页的 "Add file → Upload files" 功能，逐个文件夹拖拽上传）。
 
 ```bash
 cd voice-clone-mvp
@@ -175,11 +165,12 @@ const API_BASE = "https://voice-clone-backend-xxxx.onrender.com";
 | 现象 | 可能原因 / 处理方式 |
 |---|---|
 | 前端点"生成语音"后一直报网络错误 | 检查 `index.html` 里的 `API_BASE` 是否已经改成了 Render/Railway 的真实地址，而不是 `localhost` |
-| 报错 `HTTP 401` / `InvalidApiKey` | API Key 填错了，或者用错了地域的 Key（新加坡节点和北京节点的 Key 不通用） |
-| 报错和"配额""Quota"相关 | 免费额度用尽，去百炼控制台查看用量，或开通付费 |
-| 报错"音频不合规" / `Audio.*` | 检查音频格式（wav/mp3/m4a）、时长（建议 5–20 秒，最长不超 60 秒）、文件大小（≤10MB） |
+| 报错 `401` / `invalid_api_key` | API Key 填错了，或者这个 Key 已经被删除/禁用，去 ElevenLabs 后台重新生成一个 |
+| 报错和 `quota_exceeded` / 额度相关 | 免费额度（每月 10,000 字符）用完了，去账户设置查看用量，或升级付费档位（Starter $6/月起） |
+| 报错 `voice_not_found` | 传的 `voiceId` 不对，可能是缓存的音色已经在 ElevenLabs 后台被删除了，重新上传音频复刻一次 |
+| 声音复刻报错、提示音频问题 | 检查音频格式（wav/mp3/m4a）、时长（建议 1–5 分钟内，几秒到二十秒也可以）、文件大小（≤10MB） |
 | Render 上的后端第一次请求特别慢 | 免费档位休眠唤醒导致，等它启动完就恢复正常了 |
-| 想确认后端本身有没有问题 | 直接用浏览器打开 `你的后端地址/api/health`，能看到 `{"status":"ok"}` 说明后端本身没问题，问题出在前端配置或阿里云那一侧 |
+| 想确认后端本身有没有问题 | 直接用浏览器打开 `你的后端地址/api/health`，能看到 `{"status":"ok"}` 说明后端本身没问题，问题出在前端配置或 ElevenLabs 那一侧 |
 
 ---
 
@@ -187,22 +178,37 @@ const API_BASE = "https://voice-clone-backend-xxxx.onrender.com";
 
 - API Key 只存在你当前浏览器标签页的内存里（一个 JS 变量），刷新页面就会清空，**不会**写入
   cookie、localStorage，也不会出现在任何日志文件里。
-- Key 会通过 HTTPS 从浏览器发送到你自己部署的后端，再由后端转发给阿里云——这一跳是必须的，
-  因为浏览器无法直接跨域调用阿里云接口。只要你的 Render/Vercel 部署都是默认的 HTTPS
+- Key 会通过 HTTPS 从浏览器发送到你自己部署的后端，再由后端转发给 ElevenLabs——这一跳是必须的，
+  因为浏览器无法直接跨域调用第三方接口。只要你的 Render/Vercel 部署都是默认的 HTTPS
   （两个平台都默认开启），这个过程是加密的。
 - 这版后端是完全开放的（没有登录、没有限流），任何拿到你后端地址的人理论上都可以拿着**他们自己的**
-  API Key 来调用你的转发接口——但因为 Key 是调用方自己传的，不会消耗你的阿里云额度，风险主要是
+  API Key 来调用你的转发接口——但因为 Key 是调用方自己传的，不会消耗你的 ElevenLabs 额度，风险主要是
   "被人白嫖你的服务器算力"。如果要长期使用，建议后续加一层简单的访问口令或限流。
 
 ---
 
 ## 五、扩展方向
 
-- **换成 CosyVoice**：如果想用更丰富的中文方言音色，或者想做打字实时出声的效果，需要改用
-  WebSocket 协议对接 `{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/inference`，
-  后端要引入 `ws` 这样的 WebSocket 客户端库，复杂度会明显上升。
-- **音色管理**：阿里云支持查询音色列表、查看音色详情、删除音色，可以在后端再加几个接口，
+- **音色管理**：ElevenLabs 支持查询音色列表、删除音色、查看订阅用量，可以在后端再加几个接口，
   前端做一个"我的音色库"页面，省去每次都要重新上传参考音频。
-- **流式合成**：把 `stream: false` 改成流式模式，可以实现"边生成边播放"，减少长文本的等待时间，
-  但前端播放逻辑要相应改成处理分段的 Base64 音频数据。
+- **调节音色参数**：`text-to-speech` 接口支持 `voice_settings`（稳定性 stability、相似度
+  similarity_boost 等），可以加几个滑块给用户微调，让合成效果更贴近原声。
+- **流式合成**：换成 `/v1/text-to-speech/{voice_id}/stream` 这个接口，可以实现"边生成边播放"，
+  减少长文本的等待时间。
+- **换更专业的克隆**：ElevenLabs 除了这版用的 Instant Voice Cloning（即时克隆，几秒钟出结果），
+  还有 Professional Voice Cloning（需要更长的样本、有审核流程，但音色质量更高），适合正式产品阶段。
 - **鉴权与限流**：给自己的后端加一个简单的访问密码或者基于 IP 的限流，避免被陌生人白嫖。
+- **自建开源模型**：如果之后想完全去中心化、不依赖任何第三方 API，可以换成本地部署的开源方案
+  （如 XTTS-v2、OpenVoice），需要一台带 GPU 的服务器，架构会更复杂。
+
+---
+
+## 六、更新记录
+
+- **v1**：基于阿里云百炼 Qwen-TTS（`qwen3-tts-vc-2026-01-22`），简单 HTTP 接口。
+- **v2**：因模型访问权限问题，改用阿里云 Qwen-Audio-TTS（`qwen-audio-3.0-tts-plus`），
+  语音合成部分改为 WebSocket 协议（新加坡地域下该模型系列的非实时接口不可用）。
+- **v3（当前版本）**：声音复刻功能在阿里云账号上一直卡在 `AccessDenied.Unpurchased`
+  （账号权限未开通，客服回复不明确），改用 **ElevenLabs**——自助式服务，注册即用，
+  不需要审核。架构也因此简化回最初的"纯 HTTP 请求/响应"，去掉了 WebSocket 和
+  Workspace ID 相关的配置。
