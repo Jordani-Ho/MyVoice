@@ -273,7 +273,7 @@
   <div class="result hidden" id="result">
     <div class="step-title" style="margin-bottom:10px;">合成结果</div>
     <audio id="player" controls></audio>
-    <div class="step-hint" style="margin-top:8px;">该下载链接由阿里云提供，有效期 24 小时。</div>
+    <div class="step-hint" style="margin-top:8px;">可以直接播放或右键另存为下载；刷新页面后需要重新生成。</div>
   </div>
 
   <footer>
@@ -378,6 +378,11 @@
       // 第二步：用（新复刻的或缓存的）音色合成语音
       const audioUrl = await synthesize(apiKey, cachedVoiceId, text);
 
+      // 每次生成的音频地址都是浏览器临时创建的 Blob URL，切换到新的之前
+      // 把上一个释放掉，避免多次生成后内存越占越多。
+      if (player.src && player.src.startsWith("blob:")) {
+        URL.revokeObjectURL(player.src);
+      }
       player.src = audioUrl;
       resultEl.classList.remove("hidden");
       stepGenerate.classList.add("done");
@@ -415,9 +420,16 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ apiKey, voiceId, text }),
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(data.error || "语音合成请求失败");
-    return data.audioUrl;
+    if (!resp.ok) {
+      // 出错时后端返回的是 JSON（{ error: "..." }），成功时返回的是音频二进制数据，
+      // 所以要先看响应是否成功，再决定怎么解析响应体。
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.error || "语音合成请求失败");
+    }
+    // 后端现在直接返回音频的二进制数据（Content-Type: audio/mpeg），
+    // 不再是一个"下载链接"，这里把它转换成浏览器内可以直接播放的临时地址。
+    const audioBlob = await resp.blob();
+    return URL.createObjectURL(audioBlob);
   }
 
   // ---------------------------------------------------------------------------
