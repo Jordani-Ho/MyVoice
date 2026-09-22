@@ -59,7 +59,10 @@ app.post('/api/clone-voice', upload.single('audio'), async (req, res) => {
     const mimeType = req.file.mimetype || 'audio/wav';
     const form = new FormData();
     form.append('name', `MyVoice-${Date.now()}`);
-    form.append('files[]', new Blob([req.file.buffer], { type: mimeType }), req.file.originalname || 'sample.wav');
+    // 注意：字段名是 "files"（不带方括号）。ElevenLabs 官方文档的 curl 示例里
+    // 写的是 files[]，那只是 curl 表示"这是个数组字段"的习惯写法，实际服务端
+    // 按名字 "files" 来解析——之前用 files[] 试过，会报 "files 字段缺失"。
+    form.append('files', new Blob([req.file.buffer], { type: mimeType }), req.file.originalname || 'sample.wav');
 
     const resp = await fetch(VOICE_CLONE_ENDPOINT, {
       method: 'POST',
