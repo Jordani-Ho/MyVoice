@@ -1,7 +1,7 @@
 {
   "name": "voice-clone-backend",
   "version": "1.0.0",
-  "description": "个人声音克隆与语音合成 - 后端服务（转发请求到阿里云百炼 Qwen-TTS，解决浏览器跨域问题）",
+  "description": "个人声音克隆与语音合成 - 后端服务（转发请求到 ElevenLabs，解决浏览器跨域问题）",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -13,7 +13,6 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "multer": "^2.0.0",
-    "ws": "^8.21.3"
+    "multer": "^2.0.0"
   }
 }
