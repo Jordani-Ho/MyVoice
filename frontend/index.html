@@ -218,7 +218,7 @@
     <p>
       上传一段 5–20 秒的清晰人声样本，克隆出你的专属音色，
       再输入任意文字，用这个音色朗读出来。数据经你自己部署的后端转发给
-      阿里云百炼，不会经过任何第三方服务器。
+      ElevenLabs，不会经过其他第三方服务器。
     </p>
   </header>
 
@@ -226,12 +226,12 @@
   <div class="step" id="step-key">
     <div class="num">1</div>
     <div class="step-body">
-      <div class="step-title">填写阿里云百炼 API Key</div>
+      <div class="step-title">填写 ElevenLabs API Key</div>
       <div class="step-hint">
-        新加坡节点的 Key，在百炼控制台「API-KEY 管理」里获取。Key 只保存在你当前浏览器的内存里，
+        在 ElevenLabs 后台「Profile → API Keys」里获取。Key 只保存在你当前浏览器的内存里，
         刷新页面后需要重新填写，不会被发送到除你自己后端以外的任何地方。
       </div>
-      <input type="password" id="apiKey" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+      <input type="password" id="apiKey" placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
     </div>
   </div>
 
@@ -357,7 +357,7 @@
     const text = ttsText.value.trim();
     const file = fileInput.files[0];
 
-    if (!apiKey) return setStatus("请先填写阿里云百炼 API Key。", "error");
+    if (!apiKey) return setStatus("请先填写 ElevenLabs API Key。", "error");
     if (!cachedVoiceId && !file) return setStatus("请先上传一段参考音频。", "error");
     if (!text) return setStatus("请输入要合成的文字。", "error");
 
