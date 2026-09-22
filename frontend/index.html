@@ -126,26 +126,38 @@
   input:focus, textarea:focus { border-color: var(--accent); }
   textarea { resize: vertical; min-height: 90px; line-height: 1.6; }
 
-  .file-drop {
+  .record-btn {
+    width: 100%;
+    padding: 16px;
     border: 1px dashed var(--panel-border);
     border-radius: 8px;
-    padding: 18px;
-    text-align: center;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
     cursor: pointer;
-    font-size: 13px;
-    color: var(--text-dim);
-    transition: border-color 0.15s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
   }
-  .file-drop:hover { border-color: var(--accent); }
-  .file-drop.has-file {
+  .record-btn:hover { border-color: var(--accent); }
+  .record-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .record-btn.recording {
+    border-style: solid;
+    border-color: var(--error);
+    background: rgba(224, 122, 107, 0.12);
+    color: var(--error);
+    animation: recording-pulse 1.2s ease-in-out infinite;
+  }
+  .record-btn.learned {
     border-style: solid;
     border-color: var(--accent-dim);
-    color: var(--text);
-  }
-  .file-drop input { display: none; }
-  .file-drop .fname {
-    font-family: var(--mono);
     color: var(--accent);
+  }
+  @keyframes recording-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
   }
 
   button.generate {
@@ -216,8 +228,8 @@
   <header>
     <h1>声音工坊</h1>
     <p>
-      上传一段 5–20 秒的清晰人声样本，克隆出你的专属音色，
-      再输入任意文字，用这个音色朗读出来。数据经你自己部署的后端转发给
+      按住按钮说一段话，它就学会你的声音；之后想说什么就打字，
+      它用你自己的声音念出来。数据经你自己部署的后端转发给
       ElevenLabs，不会经过其他第三方服务器。
     </p>
   </header>
@@ -235,16 +247,19 @@
     </div>
   </div>
 
-  <!-- 第二步：上传参考音频 -->
+  <!-- 第二步：录一段声音，让它记住你 -->
   <div class="step" id="step-audio">
     <div class="num">2</div>
     <div class="step-body">
-      <div class="step-title">上传参考音频</div>
-      <div class="step-hint">支持 wav / mp3 / m4a，建议 5–20 秒，环境安静、吐字清晰、不要有背景音乐。</div>
-      <label class="file-drop" id="fileDrop">
-        <span id="fileDropText">点击选择音频文件</span>
-        <input type="file" id="audioFile" accept=".wav,.mp3,.m4a,audio/*" />
-      </label>
+      <div class="step-title">按住说话，让它记住你的声音</div>
+      <div class="step-hint">
+        按住下面的按钮说 5–20 秒（环境安静、吐字清晰），松开就会自动学习这段声音，
+        不用另外找文件上传。想换一段重新学，再按一次就行。
+      </div>
+      <button type="button" class="record-btn" id="recordBtn">🎙 按住说话</button>
+      <div class="step-hint" id="recordHint" style="margin-top:10px;"></div>
+      <button type="button" class="reset-link" id="useFileInstead">麦克风用不了？改用上传文件</button>
+      <input type="file" id="audioFile" accept=".wav,.mp3,.m4a,audio/*" style="display:none;" />
     </div>
   </div>
 
@@ -263,10 +278,10 @@
     <div class="num">4</div>
     <div class="step-body">
       <div class="step-title">生成语音</div>
-      <div class="step-hint">首次生成会先克隆音色（耗时稍长），之后只改文字、不换音频时会直接复用已克隆的音色。</div>
+      <div class="step-hint">声音在第二步已经学过了，这里点一下就直接用那段声音合成。</div>
       <button class="generate" id="generateBtn">生成语音</button>
       <div class="status" id="status"></div>
-      <button class="reset-link" id="resetVoice" style="display:none;">清除已复刻的音色，重新上传音频复刻</button>
+      <button class="reset-link" id="resetVoice" style="display:none;">清除已学到的声音，重新录一段</button>
     </div>
   </div>
 
@@ -307,9 +322,10 @@
   // DOM 元素引用
   // ---------------------------------------------------------------------------
   const apiKeyInput = document.getElementById("apiKey");
-  const fileInput = document.getElementById("audioFile");
-  const fileDrop = document.getElementById("fileDrop");
-  const fileDropText = document.getElementById("fileDropText");
+  const recordBtn = document.getElementById("recordBtn");
+  const recordHint = document.getElementById("recordHint");
+  const useFileInsteadBtn = document.getElementById("useFileInstead");
+  const fileInput = document.getElementById("audioFile"); // 麦克风用不了时的备用方案
   const ttsText = document.getElementById("ttsText");
   const generateBtn = document.getElementById("generateBtn");
   const statusEl = document.getElementById("status");
@@ -320,62 +336,147 @@
   const stepGenerate = document.getElementById("step-generate");
 
   // 缓存已经复刻好的音色 ID，避免每次生成都重新复刻（复刻本身也会消耗配额）。
-  // 只要用户没有更换音频文件，这个值就会一直被复用。
+  // 只要没有重新录一段新的声音，这个值就会一直被复用。
   let cachedVoiceId = null;
 
   // ---------------------------------------------------------------------------
-  // 选择文件后的界面反馈
+  // 按住说话：用浏览器的麦克风录一段音频，松开手就自动拿去学习声音，
+  // 中间不需要"选文件、点上传"这些额外步骤。
   // ---------------------------------------------------------------------------
-  fileInput.addEventListener("change", () => {
-    // 换了新文件，之前复刻的音色就不能再用了，需要清空缓存重新复刻
-    cachedVoiceId = null;
-    resetVoiceBtn.style.display = "none";
-    stepAudio.classList.remove("done");
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let isRecording = false;
 
-    const file = fileInput.files[0];
-    if (file) {
-      fileDrop.classList.add("has-file");
-      fileDropText.innerHTML = "已选择：<span class=\"fname\">" + escapeHtml(file.name) + "</span>";
-    } else {
-      fileDrop.classList.remove("has-file");
-      fileDropText.textContent = "点击选择音频文件";
+  // 按浏览器支持情况，挑一个 MediaRecorder 能用的音频格式
+  function pickRecordingMimeType() {
+    const candidates = ["audio/webm", "audio/ogg", "audio/mp4"];
+    for (const type of candidates) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) return type;
     }
+    return ""; // 都不支持的话，交给浏览器自己决定
+  }
+
+  async function startRecording() {
+    if (isRecording) return;
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      setStatus("这个浏览器不支持录音，请点下面「改用上传文件」。", "error");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = pickRecordingMimeType();
+      mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      recordedChunks = [];
+
+      mediaRecorder.addEventListener("dataavailable", (e) => {
+        if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+      });
+
+      mediaRecorder.addEventListener("stop", () => {
+        // 录完就把麦克风释放掉，别一直占着
+        stream.getTracks().forEach((track) => track.stop());
+        const blobType = mediaRecorder.mimeType || "audio/webm";
+        const blob = new Blob(recordedChunks, { type: blobType });
+        if (blob.size > 0) {
+          learnVoiceFrom(blob, `recording.${(blobType.split("/")[1] || "webm").split(";")[0]}`);
+        }
+      });
+
+      mediaRecorder.start();
+      isRecording = true;
+      recordBtn.classList.add("recording");
+      recordBtn.classList.remove("learned");
+      recordBtn.textContent = "🔴 正在录音…松开结束";
+    } catch (err) {
+      setStatus("没能打开麦克风：" + err.message + "（可以改用下面的「上传文件」）", "error");
+    }
+  }
+
+  function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    isRecording = false;
+    recordBtn.classList.remove("recording");
+    recordBtn.textContent = "🎙 按住说话";
+    if (mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  }
+
+  ["mousedown", "touchstart"].forEach((evt) => {
+    recordBtn.addEventListener(evt, (e) => {
+      e.preventDefault();
+      startRecording();
+    });
   });
+  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((evt) => {
+    recordBtn.addEventListener(evt, () => stopRecording());
+  });
+
+  // 备用方案：麦克风用不了时，退回到"选文件"
+  useFileInsteadBtn.addEventListener("click", () => {
+    fileInput.style.display = "block";
+    fileInput.click();
+    recordBtn.style.display = "none";
+    useFileInsteadBtn.style.display = "none";
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (file) learnVoiceFrom(file, file.name);
+  });
+
+  // 拿到一段参考音频（不管是录的还是上传的文件）之后，立刻自动去学习这段声音，
+  // 不用等用户再点别的按钮——这样"说话"本身就带出了学声音这个效果。
+  async function learnVoiceFrom(audioBlob, filename) {
+    const apiKey = apiKeyInput.value.trim();
+    cachedVoiceId = null;
+    stepAudio.classList.remove("done");
+    resetVoiceBtn.style.display = "none";
+    recordBtn.classList.remove("learned");
+
+    if (!apiKey) {
+      recordHint.textContent = "";
+      setStatus("请先在上面填写 ElevenLabs API Key，再按住说话。", "error");
+      return;
+    }
+
+    recordBtn.disabled = true;
+    recordHint.textContent = "正在学习这段声音……";
+    try {
+      cachedVoiceId = await cloneVoice(apiKey, audioBlob, filename);
+      stepAudio.classList.add("done");
+      recordBtn.classList.add("learned");
+      recordHint.textContent = "已经记住这段声音了，直接去下面生成语音吧。";
+      resetVoiceBtn.style.display = "inline-block";
+    } catch (err) {
+      recordHint.textContent = "";
+      setStatus("学习声音失败：" + err.message, "error");
+    } finally {
+      recordBtn.disabled = false;
+    }
+  }
 
   resetVoiceBtn.addEventListener("click", () => {
     cachedVoiceId = null;
     resetVoiceBtn.style.display = "none";
     stepAudio.classList.remove("done");
-    setStatus("已清除音色缓存，下次生成会重新复刻。", "");
+    recordBtn.classList.remove("learned");
+    recordHint.textContent = "";
+    setStatus("已经清除学到的声音，按住按钮重新说一段就行。", "");
   });
 
   // ---------------------------------------------------------------------------
-  // 生成按钮主流程
+  // 生成按钮主流程（声音在第二步已经学过了，这里只负责合成）
   // ---------------------------------------------------------------------------
   generateBtn.addEventListener("click", async () => {
     const apiKey = apiKeyInput.value.trim();
     const text = ttsText.value.trim();
-    const file = fileInput.files[0];
 
     if (!apiKey) return setStatus("请先填写 ElevenLabs API Key。", "error");
-    if (!cachedVoiceId && !file) return setStatus("请先上传一段参考音频。", "error");
+    if (!cachedVoiceId) return setStatus("请先按住上面的按钮说一段话，让它先学会你的声音。", "error");
     if (!text) return setStatus("请输入要合成的文字。", "error");
 
     setLoading(true);
-
     try {
-      // 第一步（仅在还没有缓存音色时执行）：声音复刻
-      if (!cachedVoiceId) {
-        setStatus("正在复刻音色，请稍候……", "");
-        cachedVoiceId = await cloneVoice(apiKey, file);
-        stepAudio.classList.add("done");
-        resetVoiceBtn.style.display = "inline-block";
-        setStatus("音色复刻成功（ID: " + cachedVoiceId + "），正在合成语音……", "");
-      } else {
-        setStatus("正在使用已复刻的音色合成语音……", "");
-      }
-
-      // 第二步：用（新复刻的或缓存的）音色合成语音
+      setStatus("正在用你的声音合成……", "");
       const audioUrl = await synthesize(apiKey, cachedVoiceId, text);
 
       // 每次生成的音频地址都是浏览器临时创建的 Blob URL，切换到新的之前
@@ -395,12 +496,12 @@
   });
 
   // ---------------------------------------------------------------------------
-  // 调用后端：声音复刻
+  // 调用后端：声音复刻（audioBlob 可能是录音得到的 Blob，也可能是上传的 File）
   // ---------------------------------------------------------------------------
-  async function cloneVoice(apiKey, file) {
+  async function cloneVoice(apiKey, audioBlob, filename) {
     const form = new FormData();
     form.append("apiKey", apiKey);
-    form.append("audio", file);
+    form.append("audio", audioBlob, filename || "audio.webm");
 
     const resp = await fetch(API_BASE + "/api/clone-voice", {
       method: "POST",
@@ -443,12 +544,6 @@
   function setLoading(loading) {
     generateBtn.disabled = loading;
     generateBtn.textContent = loading ? "生成中…" : "生成语音";
-  }
-
-  function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
   }
 </script>
 </body>
